@@ -36,6 +36,12 @@ Though a personal passion project, I'm open to suggestions and contributions! If
 - Python packages: install via `pip install -r requirements.txt` to pull in `kivy`, `speechrecognition`, `pvporcupine`, `pvrecorder`, `fuzzywuzzy`, and supporting audio drivers.
 - System audio: ensure ALSA utilities are present (`sudo apt-get install alsa-utils portaudio19-dev`).
 
+### Facial animation / visemes
+- PNG mouth frames in `faces/` drive lip-sync. Files are ordered alphabetically, so name them with leading numbers (e.g., `00-rest.png`, `10-open.png`, `20-wide.png`) to control intensity levels from idle to the largest mouth shape.
+- Idle faces can be `.jpg` or `.png` in the same folder; they are chosen randomly when BMO is not speaking.
+- The playback loop samples audio energy (WAV files) in 80ms windows to determine which PNG to display. Other formats still animate using a synthesized timing curve, so keep a few distinct mouth PNGs for clearer motion.
+- To add a new viseme: drop the PNG into `faces/`, restart the app, and confirm it appears in the sorted order. Pair your PNG names with expected intensity (low numbers = closed mouth, high numbers = open mouth) for smooth interpolation.
+
 ### Fish Audio text-to-speech configuration
 BMO now uses the Fish Audio API for synthesizing dialogue. Configure the API key and optional settings via environment variables before launching the app (add them to your shell profile or service unit so they persist on boot):
 
