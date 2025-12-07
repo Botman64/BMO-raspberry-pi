@@ -36,6 +36,18 @@ Though a personal passion project, I'm open to suggestions and contributions! If
 - Python packages: install via `pip install -r requirements.txt` to pull in `kivy`, `speechrecognition`, `pvporcupine`, `pvrecorder`, `fuzzywuzzy`, and supporting audio drivers.
 - System audio: ensure ALSA utilities are present (`sudo apt-get install alsa-utils portaudio19-dev`).
 
+### Fish Audio text-to-speech configuration
+BMO now uses the Fish Audio API for synthesizing dialogue. Configure the API key and optional settings via environment variables before launching the app (add them to your shell profile or service unit so they persist on boot):
+
+```bash
+export FISH_AUDIO_API_KEY="<your-api-key>"
+export FISH_AUDIO_BASE_URL="https://api.fish.audio/v1"  # optional override for self-hosted gateways
+export FISH_AUDIO_MODEL="gpt_sovits"                     # optional model name
+export FISH_AUDIO_SPEAKER_ID="bmo"                       # optional speaker or voice preset
+```
+
+If the API call fails, BMO will play an error voice clip and retry the request automatically before giving up.
+
 ### Picovoice wake word configuration
 1. Create a [Picovoice Console](https://console.picovoice.ai/) account and generate an **AccessKey**.
 2. Download a Porcupine keyword model (`.ppn`) tuned for your wake phrase (or use the built-in `bumblebee` keyword).
