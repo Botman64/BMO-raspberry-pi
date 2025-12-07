@@ -1,62 +1,23 @@
 import os
+
 os.environ['KIVY_AUDIO'] = 'sdl2'
 from kivy.app import App
+from kivy.clock import Clock
+from kivy.core.audio import SoundLoader
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.image import Image
-from kivy.core.audio import SoundLoader
 from kivy.uix.video import Video
-from kivy.clock import Clock
+import pvporcupine
+import random
+import speech_recognition as sr
 import threading
 import time
-import speech_recognition as sr
-from fuzzywuzzy import process
-import random
-import pvporcupine
 from pvrecorder import PvRecorder
+
+from command_router import CommandRouter
 
 TALKING_VIDEO = './Videos/talking.mp4'
 
-
-responses = {
-    "hello": [
-        {"audio": "./responses/hello-1.wav"},
-        {"audio": "./responses/hello-2.wav"},
-        {"audio": "./responses/hello-3.wav"}
-    ],
-    "how are you": [
-        {"audio": "./responses/how-are-you-1.wav"},
-        {"audio": "./responses/how-are-you-2.wav"},
-        {"audio": "./responses/how-are-you-3.wav"}
-    ],
-
-    "sing me a song": [
-        {"audio": "./songs/Fly me to the Moon.mp3", "picture": "./pictures/space-cowboy.jpg"},
-        {"audio": "./songs/I Dont Want to Set the World on Fire.mp3", "picture": "./pictures/cowboy.PNG"},
-        {"audio": "./songs/Rises the Moon.mp3", "picture": "./pictures/happy.PNG"},
-        {"audio": "./songs/From The Start.mp3", "picture": "./pictures/song-face.PNG"}
-    ],
-    "tell me something funny":[
-        {"audio": "./memes/SIX-CONSOLES.wav", "picture": "./pictures/song-face.PNG"},
-    ],
-
-    "what time is it": [
-        {"video": "./Videos/Original-Intro.mp4"},
-        {"video": "./Videos/Bad-Jubies-intro.mp4"},
-        {"video": "./Videos/elements-intro.mp4"},
-        {"video": "./Videos/Finale-intro.mp4"},
-        {"video": "./Videos/Food-Chain-intro.mp4"},
-        {"video": "./Videos/Islands-intro.mp4"},
-        {"video": "./Videos/Pixel-intro.mp4"},
-        {"video": "./Videos/Stakes-intro.mp4"}
-    ],
-    "tell me a story": [
-        {"video": "./Videos/boat-story.mp4"},
-        {"video": "./Videos/Robot-Cowboy.mp4"},
-    ],
-    "goodnight": [
-        {"audio": "./responses/goodnight.wav"}
-    ]
-}
 
 image_directory = "./faces"
 images = [os.path.join(image_directory, f) for f in os.listdir(image_directory) if f.endswith('.jpg')]
@@ -75,6 +36,7 @@ class BMOApp(App):
         self.stop_listening_event = threading.Event()
         self.on_audio_complete = None
         self.device_index = int(os.environ.get("PICOVOICE_DEVICE_INDEX", 0))
+        self.command_router = CommandRouter()
 
     def build(self):
         self.layout = BoxLayout()
@@ -183,12 +145,7 @@ class BMOApp(App):
 
         try:
             speech_text = r.recognize_google(audio)
-            # if "hey BeeMo" not in speech_text.upper():  # Checks if wake word "BMO" is in the recognized text
-            #     return
-
-            closest_match, score = process.extractOne(speech_text, responses.keys())
-            if score >= 80:
-                self.process_command(closest_match)
+            self.process_command(speech_text)
         except sr.UnknownValueError:
             self.talk_audio("./responses/unknown-value-error.wav")  # Placeholder for error audio
         except sr.RequestError:
@@ -197,25 +154,16 @@ class BMOApp(App):
             self.awaiting_command = False
 
     def process_command(self, command):
-        self.is_playing = True
-        if command == "goodnight":
-            self.power_down()
-            return
-        
-        response_options = responses[command]
-        selected_response = random.choice(response_options)
-        
-        if selected_response.get("audio"):
-            if selected_response.get("picture"):
-                # Display the specified picture with the audio
-                self.play_static_audio_with_image(selected_response["audio"], selected_response["picture"])
-            else:
-                # If there's no picture, use the talking video as default
-                self.talk_audio(selected_response["audio"])
-        
-        # If there's a video (and it's not the TALKING_VIDEO), play it
-        if selected_response.get("video") and selected_response.get("video") != TALKING_VIDEO:
-            self.play_video(selected_response["video"])
+        try:
+            self.is_playing = True
+            routed_response = self.command_router.route_command(command)
+            if routed_response.content:
+                print(f"BMO: {routed_response.content}")
+        finally:
+            self.is_playing = False
+            if self.command_enabled:
+                self.awaiting_command = False
+                self.start_wake_word_listener()
 
     def play_video(self, video_path):
         self.layout.clear_widgets()
