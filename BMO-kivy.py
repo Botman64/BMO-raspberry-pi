@@ -11,6 +11,8 @@ import time
 import speech_recognition as sr
 from fuzzywuzzy import process
 import random
+import pvporcupine
+from pvrecorder import PvRecorder
 
 TALKING_VIDEO = './Videos/talking.mp4'
 
@@ -50,6 +52,9 @@ responses = {
     "tell me a story": [
         {"video": "./Videos/boat-story.mp4"},
         {"video": "./Videos/Robot-Cowboy.mp4"},
+    ],
+    "goodnight": [
+        {"audio": "./responses/goodnight.wav"}
     ]
 }
 
@@ -63,27 +68,32 @@ class BMOApp(App):
         super().__init__(**kwargs)
         self.is_playing = False  # Flag to check if video or audio is currently playing
         self.max_video_duration = 0
+        self.command_enabled = False
+        self.awaiting_command = False
+        self.porcupine = None
+        self.wake_listener_thread = None
+        self.stop_listening_event = threading.Event()
+        self.on_audio_complete = None
+        self.device_index = int(os.environ.get("PICOVOICE_DEVICE_INDEX", 0))
 
     def build(self):
         self.layout = BoxLayout()
         self.image = Image(source=random.choice(images), allow_stretch=True)
         self.layout.add_widget(self.image)
-        
-        # Start with the initial greeting
-        self.initial_greeting()
-        
+
+        self.power_up()
+
         return self.layout
 
-    def initial_greeting(self):
-        # Play the talking video and loop it for the duration of the audio
-        initial_audio_path = "./responses/startup.mp3"
-        self.talk_audio(initial_audio_path)
+    def power_up(self):
+        self.command_enabled = False
+        self.stop_wake_word_listener()
+        self.play_power_up_sequence()
 
-        # Schedule the listener to start after the audio finishes
-        sound = SoundLoader.load(initial_audio_path)
-        if sound:
-            duration = sound.length
-            Clock.schedule_once(self.listen_for_command, duration + 2)  # +2 seconds to give a brief pause before listening
+    def power_down(self):
+        self.command_enabled = False
+        self.stop_wake_word_listener()
+        self.play_power_down_sequence()
 
     def change_face(self, *args):
         self.image.source = random.choice(images)
@@ -119,9 +129,10 @@ class BMOApp(App):
             self.image = Image(source=random.choice(images), allow_stretch=True)
             self.layout.add_widget(self.image)
 
-    def talk_audio(self, audio_path):
+    def talk_audio(self, audio_path, on_complete=None):
         """Play an audio and loop a 1-second video until the audio is finished."""
         self.is_playing = True
+        self.on_audio_complete = on_complete
         sound = SoundLoader.load(audio_path)
         if sound:
             duration = sound.length
@@ -146,17 +157,26 @@ class BMOApp(App):
     def on_audio_end(self, *args):
         self.is_playing = False
         self.end_song_display()
+        callback = self.on_audio_complete
+        self.on_audio_complete = None
+        if callback:
+            callback()
+        elif self.command_enabled:
+            self.awaiting_command = False
 
     def end_song_display(self, *args):
         self.layout.clear_widgets()
         self.image = Image(source=random.choice(images), allow_stretch=True)
         self.layout.add_widget(self.image)
-        Clock.schedule_once(self.listen_for_command, 5)  # Delay for 5 seconds before listening again
+        if self.command_enabled:
+            self.awaiting_command = False
+            self.start_wake_word_listener()
 
     def listen_for_command(self, *args):
-        if self.is_playing:  # If a video or audio is currently playing, don't listen for commands
+        if self.is_playing or not self.command_enabled:  # If a video or audio is currently playing, don't listen for commands
             return
-        
+
+        self.awaiting_command = True
         r = sr.Recognizer()
         with sr.Microphone() as source:
             audio = r.listen(source)
@@ -173,12 +193,13 @@ class BMOApp(App):
             self.talk_audio("./responses/unknown-value-error.wav")  # Placeholder for error audio
         except sr.RequestError:
             self.talk_audio("./responses/fatal-error.wav")  # Placeholder for error audio
+        finally:
+            self.awaiting_command = False
 
     def process_command(self, command):
-        self.is_playing = True  
+        self.is_playing = True
         if command == "goodnight":
-            self.talk_audio(responses["goodnight"][0]["audio"])
-            self.stop()  # This will stop the Kivy application
+            self.power_down()
             return
         
         response_options = responses[command]
@@ -208,7 +229,67 @@ class BMOApp(App):
         self.layout.clear_widgets()
         self.image = Image(source=random.choice(images), allow_stretch=True)
         self.layout.add_widget(self.image)
-        Clock.schedule_once(self.listen_for_command, 5)
+        if self.command_enabled:
+            self.awaiting_command = False
+            self.start_wake_word_listener()
+
+    def play_power_up_sequence(self):
+        initial_audio_path = "./responses/startup.mp3"
+        self.talk_audio(initial_audio_path, on_complete=self.enable_command_handling)
+
+    def play_power_down_sequence(self):
+        shutdown_audio_path = "./responses/goodnight.wav"
+        self.talk_audio(shutdown_audio_path, on_complete=self.stop)
+
+    def enable_command_handling(self):
+        self.command_enabled = True
+        self.start_wake_word_listener()
+
+    def initialize_wake_word(self):
+        if self.porcupine:
+            return
+        access_key = os.environ.get("PICOVOICE_ACCESS_KEY")
+        keyword_path = os.environ.get("PICOVOICE_KEYWORD_PATH")
+        keywords = None if keyword_path else ["bumblebee"]
+        self.porcupine = pvporcupine.create(
+            access_key=access_key,
+            keyword_paths=[keyword_path] if keyword_path else None,
+            keywords=keywords,
+        )
+
+    def start_wake_word_listener(self):
+        if not self.command_enabled or self.is_playing:
+            return
+
+        self.initialize_wake_word()
+        if self.wake_listener_thread and self.wake_listener_thread.is_alive():
+            return
+
+        self.stop_listening_event.clear()
+        self.wake_listener_thread = threading.Thread(target=self._wake_word_loop, daemon=True)
+        self.wake_listener_thread.start()
+
+    def stop_wake_word_listener(self):
+        self.stop_listening_event.set()
+        if self.wake_listener_thread and self.wake_listener_thread.is_alive():
+            self.wake_listener_thread.join()
+        self.wake_listener_thread = None
+
+    def _wake_word_loop(self):
+        recorder = PvRecorder(device_index=self.device_index, frame_length=self.porcupine.frame_length)
+        recorder.start()
+        try:
+            while not self.stop_listening_event.is_set():
+                pcm = recorder.read()
+                if self.porcupine.process(pcm) >= 0 and not self.awaiting_command and not self.is_playing:
+                    self.awaiting_command = True
+                    Clock.schedule_once(self.listen_for_command, 0)
+        finally:
+            recorder.stop()
+            recorder.delete()
+
+    def on_stop(self):
+        self.stop_wake_word_listener()
 
 
 BMOApp().run()

@@ -29,3 +29,25 @@ Inspired by a creative TikTok showcasing a real-life BMO, this project was my jo
 Though a personal passion project, I'm open to suggestions and contributions! If you have ideas or spot any bugs:
 - Fork the repository and submit a pull request.
 - Alternatively, feel free to open an issue. Let's make BMO better, together!
+
+## 🛠️ Setup Notes (Raspberry Pi)
+
+### Dependencies
+- Python packages: install via `pip install -r requirements.txt` to pull in `kivy`, `speechrecognition`, `pvporcupine`, `pvrecorder`, `fuzzywuzzy`, and supporting audio drivers.
+- System audio: ensure ALSA utilities are present (`sudo apt-get install alsa-utils portaudio19-dev`).
+
+### Picovoice wake word configuration
+1. Create a [Picovoice Console](https://console.picovoice.ai/) account and generate an **AccessKey**.
+2. Download a Porcupine keyword model (`.ppn`) tuned for your wake phrase (or use the built-in `bumblebee` keyword).
+3. Provide credentials and models to the app via environment variables:
+   ```bash
+   export PICOVOICE_ACCESS_KEY="<your-access-key>"
+   export PICOVOICE_KEYWORD_PATH="/path/to/keyword.ppn"  # omit to use the bundled "bumblebee" model
+   export PICOVOICE_DEVICE_INDEX=0  # optional: ALSA input index for your microphone
+   ```
+
+### Raspberry Pi audio tips
+- Confirm your microphone is recognized: `arecord -l` should list the capture card/device.
+- Set the default input level with `alsamixer` and unmute the capture channel if needed.
+- If you have multiple inputs, adjust the `PICOVOICE_DEVICE_INDEX` (matching the `arecord -l` listing) so wake-word detection listens to the correct device.
+- Keep the mic close to BMO and reduce background noise for best wake-word detection accuracy.
