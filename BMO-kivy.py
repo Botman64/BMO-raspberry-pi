@@ -28,11 +28,11 @@ image_directory = "./faces"
 
 
 def _load_images_with_extensions(*extensions):
-    return [
+    return sorted(
         os.path.join(image_directory, f)
         for f in os.listdir(image_directory)
         if f.lower().endswith(extensions)
-    ]
+    )
 
 
 images = _load_images_with_extensions(".jpg", ".png")
