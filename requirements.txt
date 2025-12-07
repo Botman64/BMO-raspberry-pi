@@ -1,0 +1,6 @@
+kivy
+SpeechRecognition
+pvporcupine
+pvrecorder
+fuzzywuzzy[speedup]
+pyaudio
