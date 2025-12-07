@@ -15,6 +15,7 @@ import time
 from pvrecorder import PvRecorder
 
 from command_router import CommandRouter
+from fish_audio import FishAudioClient
 
 TALKING_VIDEO = './Videos/talking.mp4'
 
@@ -37,6 +38,7 @@ class BMOApp(App):
         self.on_audio_complete = None
         self.device_index = int(os.environ.get("PICOVOICE_DEVICE_INDEX", 0))
         self.command_router = CommandRouter()
+        self.tts_client = FishAudioClient()
 
     def build(self):
         self.layout = BoxLayout()
@@ -123,16 +125,13 @@ class BMOApp(App):
         self.on_audio_complete = None
         if callback:
             callback()
-        elif self.command_enabled:
-            self.awaiting_command = False
+        else:
+            self._resume_command_handling()
 
     def end_song_display(self, *args):
         self.layout.clear_widgets()
         self.image = Image(source=random.choice(images), allow_stretch=True)
         self.layout.add_widget(self.image)
-        if self.command_enabled:
-            self.awaiting_command = False
-            self.start_wake_word_listener()
 
     def listen_for_command(self, *args):
         if self.is_playing or not self.command_enabled:  # If a video or audio is currently playing, don't listen for commands
@@ -154,16 +153,50 @@ class BMOApp(App):
             self.awaiting_command = False
 
     def process_command(self, command):
+        if self.is_playing:
+            return
+
+        self.is_playing = True
         try:
-            self.is_playing = True
             routed_response = self.command_router.route_command(command)
-            if routed_response.content:
-                print(f"BMO: {routed_response.content}")
-        finally:
-            self.is_playing = False
-            if self.command_enabled:
-                self.awaiting_command = False
-                self.start_wake_word_listener()
+            reply_text = routed_response.content
+            if reply_text:
+                print(f"BMO: {reply_text}")
+                self._speak_response(reply_text)
+            else:
+                self._handle_tts_failure("Empty response from router.")
+        except Exception as exc:  # pragma: no cover - runtime guard
+            print(f"Error while processing command: {exc}")
+            self._handle_tts_failure(str(exc))
+
+    def _speak_response(self, reply_text: str):
+        try:
+            audio_path = self.tts_client.synthesize_to_path(reply_text)
+        except Exception as exc:  # pragma: no cover - runtime guard
+            print(f"Fish Audio request failed: {exc}")
+            self._handle_tts_failure(str(exc))
+            return
+
+        self.talk_audio(audio_path, on_complete=self._cleanup_temp_audio(audio_path))
+
+    def _cleanup_temp_audio(self, audio_path: str):
+        def _cleanup():
+            try:
+                if audio_path and os.path.exists(audio_path):
+                    os.remove(audio_path)
+            finally:
+                self._resume_command_handling()
+
+        return _cleanup
+
+    def _resume_command_handling(self):
+        if self.command_enabled:
+            self.awaiting_command = False
+            self.start_wake_word_listener()
+
+    def _handle_tts_failure(self, reason: str):
+        print(f"TTS failure: {reason}")
+        self.talk_audio("./responses/fatal-error.wav")
 
     def play_video(self, video_path):
         self.layout.clear_widgets()
